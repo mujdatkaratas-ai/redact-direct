@@ -4,3 +4,6 @@ dist/
 .env.vercel
 *.pyc
 __pycache__/
+
+.vercel
+.env*

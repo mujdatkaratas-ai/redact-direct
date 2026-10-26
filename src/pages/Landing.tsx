@@ -82,6 +82,7 @@ const Landing: React.FC = () => {
           <nav className="flex items-center gap-6">
             <a href="#services" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">Services</a>
             <a href="#how" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">How it works</a>
+            <a href="#security" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">Security</a>
             <a href="#pricing" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">Pricing</a>
             <Link
               to="/portal"
@@ -152,6 +153,133 @@ const Landing: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      </section>
+
+      {/* Air gap section */}
+      <section id="security" className="py-20 lg:py-28 bg-slate-50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-900 text-white text-xs font-bold uppercase tracking-widest rounded mb-4">
+              <Server className="w-3.5 h-3.5" /> Why we're different
+            </div>
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900">
+              Your documents never touch the cloud
+            </h2>
+            <p className="mt-4 text-lg text-slate-600">
+              Most redaction services upload your files to a cloud server, send them to a third-party
+              AI provider, and process them in a data centre you've never heard of. We don't.
+            </p>
+          </div>
+
+          {/* Air gap explained */}
+          <div className="grid md:grid-cols-2 gap-8 mb-10">
+            {/* What others do */}
+            <div className="bg-white rounded-xl border border-slate-200 p-7">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 bg-red-50 rounded flex items-center justify-center">
+                  <Lock className="w-4 h-4 text-red-500" />
+                </div>
+                <h3 className="font-bold text-slate-900">Other redaction services</h3>
+              </div>
+              <ul className="space-y-3 text-sm text-slate-600">
+                <li className="flex items-start gap-2">
+                  <span className="text-red-400 mt-0.5">✗</span>
+                  Your files are uploaded to a cloud server
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-red-400 mt-0.5">✗</span>
+                  Documents are sent to a third-party AI provider (OpenAI, Google, AWS)
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-red-400 mt-0.5">✗</span>
+                  Your data is processed in a data centre you can't audit
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-red-400 mt-0.5">✗</span>
+                  You have no way to verify your files were deleted after processing
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-red-400 mt-0.5">✗</span>
+                  A breach at the AI provider means your data is exposed
+                </li>
+              </ul>
+            </div>
+
+            {/* What we do */}
+            <div className="bg-slate-900 text-white rounded-xl p-7">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 bg-white/10 rounded flex items-center justify-center">
+                  <ShieldCheck className="w-4 h-4 text-green-400" />
+                </div>
+                <h3 className="font-bold">Redact Direct</h3>
+              </div>
+              <ul className="space-y-3 text-sm text-white/80">
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+                  Files are uploaded through an encrypted portal to a controlled environment
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+                  Redaction runs on our own infrastructure — no third-party AI provider
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+                  No cloud model ever sees your documents
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+                  Files are deleted after the redacted pack is delivered — verified, not promised
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+                  Every page is reviewed by a person before it leaves us
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* The air gap explained */}
+          <div className="bg-white rounded-xl border-2 border-slate-900 p-8">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center shrink-0">
+                <Server className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900 mb-2">What "air-gapped" means</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  An air gap is a physical separation between the system that processes your documents
+                  and any external network. Your files move through the secure upload portal, are processed
+                  in a controlled environment that has no connection to external AI services, and the
+                  finished pack is delivered back through the same encrypted channel. At no point does
+                  your data leave our control or pass through a third party. That's the difference between
+                  <strong> "we use AI"</strong> and <strong>"we use AI, but your data never leaves our control."</strong>
+                </p>
+              </div>
+            </div>
+
+            {/* Flow diagram */}
+            <div className="mt-8 grid md:grid-cols-3 gap-4 text-center">
+              <div className="bg-slate-50 rounded-lg p-4">
+                <Upload className="w-6 h-6 text-slate-700 mx-auto mb-2" />
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Step 1</div>
+                <div className="text-sm font-semibold text-slate-900">Encrypted upload</div>
+                <div className="text-xs text-slate-500 mt-1">TLS 1.3 in transit, encrypted at rest</div>
+              </div>
+              <div className="bg-slate-900 text-white rounded-lg p-4">
+                <ShieldCheck className="w-6 h-6 text-green-400 mx-auto mb-2" />
+                <div className="text-xs font-bold uppercase tracking-wider text-white/40 mb-1">Step 2</div>
+                <div className="text-sm font-semibold">Air-gapped processing</div>
+                <div className="text-xs text-white/50 mt-1">No external AI, no cloud, human review</div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-4">
+                <Download className="w-6 h-6 text-slate-700 mx-auto mb-2" />
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Step 3</div>
+                <div className="text-sm font-semibold text-slate-900">Secure download</div>
+                <div className="text-xs text-slate-500 mt-1">Signed URL, 30-day retention, then deleted</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
