@@ -1,0 +1,10 @@
+{
+  "name": "Redact Direct",
+  "short_name": "Redact Direct",
+  "description": "Secure redaction for SAR, FOI and EIR requests. Upload documents, we redact them, you download the finished pack.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "icons": []
+}
