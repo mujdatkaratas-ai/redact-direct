@@ -1,12 +1,12 @@
 // Redact Direct — pricing and service configuration.
 
-/** Per-job pricing (in pence). */
+/** Per-job pricing (in pence) + Stripe price IDs. */
 export const PRICING = {
-  documentRedaction: { label: 'Document redaction', price: 7500, desc: 'Emails, records, personnel files — per job' },
-  sarRedaction: { label: 'Full SAR redaction', price: 25000, desc: 'Complete subject access request pack — per job' },
-  complexSar: { label: 'Complex safeguarding SAR', price: 75000, desc: 'Safeguarding records, multi-party, sensitive material — per job' },
-  cctvRedaction: { label: 'CCTV redaction', price: 1000, desc: 'Per minute of footage — blur faces, remove identifiers' },
-  managedSar: { label: 'Fully managed SAR', price: 75000, desc: 'We handle the entire request: collection, redaction, exemption advice, disclosure pack' },
+  documentRedaction: { label: 'Document redaction', price: 7500, stripePriceId: 'price_1UV90mD8BaLTPam5fzRKrHtE', desc: 'Emails, records, personnel files — per job' },
+  sarRedaction: { label: 'Full SAR redaction', price: 25000, stripePriceId: 'price_1UV92GD8BaLTPam5A8KfhEG4', desc: 'Complete subject access request pack — per job' },
+  complexSar: { label: 'Complex safeguarding SAR', price: 50000, stripePriceId: 'price_1UV93LD8BaLTPam5hDeiVlwL', desc: 'Safeguarding records, multi-party, sensitive material — per job' },
+  cctvRedaction: { label: 'CCTV redaction', price: 1000, stripePriceId: null, desc: 'Per minute of footage — blur faces, remove identifiers' },
+  managedSar: { label: 'Fully managed SAR', price: 75000, stripePriceId: 'price_1UV94hD8BaLTPam5AicpOhhA', desc: 'We handle the entire request: collection, redaction, exemption advice, disclosure pack' },
 } as const;
 
 export const COMPANY = {
@@ -27,6 +27,19 @@ export const PRICING_TABLE = [
   { ...PRICING.cctvRedaction, id: 'cctv', unit: 'per minute' },
   { ...PRICING.managedSar, id: 'managed', unit: 'per job' },
 ];
+
+/** Stripe price IDs for each service tier (null = no fixed price, e.g. CCTV per-minute). */
+export const STRIPE_PRICE_IDS: Record<string, string | null> = {
+  document: PRICING.documentRedaction.stripePriceId,
+  sar: PRICING.sarRedaction.stripePriceId,
+  complex: PRICING.complexSar.stripePriceId,
+  cctv: PRICING.cctvRedaction.stripePriceId,
+  managed: PRICING.managedSar.stripePriceId,
+};
+
+/** Stripe publishable key (safe for the browser). */
+export const STRIPE_PUBLISHABLE_KEY =
+  'pk_live_51MaD6vID8ECJYd2DSrJoiDyGFMNJ9XuWRJJGQsm2FU4NTDqnxYFfmGgfs9lo6LZg6A9OUcxony9LEvVXan3QPx8b00BZARsQHT';
 
 export function formatPence(pence: number): string {
   return `£${(pence / 100).toLocaleString('en-GB', {
