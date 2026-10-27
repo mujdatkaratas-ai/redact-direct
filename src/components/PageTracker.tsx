@@ -7,7 +7,7 @@ declare global {
   }
 }
 
-const GA_ID = 'G-PLACEHOLDER';
+const GA_ID = 'G-122FTBLJJX';
 
 export default function PageTracker() {
   const { pathname, search } = useLocation();
