@@ -139,16 +139,17 @@ def download_file(storage_path: str, local_path: Path):
 def upload_file(local_path: Path, storage_path: str, content_type: str = "application/octet-stream"):
     """Upload a file to the bucket."""
     with open(local_path, "rb") as f:
-        r = requests.post(
-            f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{storage_path}",
-            headers={
-                "Authorization": f"Bearer {SERVICE_KEY}",
-                "apikey": SERVICE_KEY,
-                "x-upsert": "false",
-                "Content-Type": content_type,
-            },
-            data=f,
-        )
+        file_data = f.read()
+    r = requests.post(
+        f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{storage_path}",
+        headers={
+            "Authorization": f"Bearer {SERVICE_KEY}",
+            "apikey": SERVICE_KEY,
+            "x-upsert": "true",
+            "Content-Type": content_type,
+        },
+        data=file_data,
+    )
     return r.status_code in (200, 201)
 
 def create_signed_url(storage_path: str, expires: int = 60):
