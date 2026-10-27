@@ -39,7 +39,7 @@ export const STRIPE_PRICE_IDS: Record<string, string | null> = {
 
 /** Stripe publishable key (safe for the browser). */
 export const STRIPE_PUBLISHABLE_KEY =
-  'pk_live_51MaD6vID8ECJYd2DSrJoiDyGFMNJ9XuWRJJGQsm2FU4NTDqnxYFfmGgfs9lo6LZg6A9OUcxony9LEvVXan3QPx8b00BZARsQHT';
+  'pk_live_51U0aReD8BaLTPam5zRiR2h1EyKv4U2fREi3JqZKj1Gdn4brkM6SYYAo2rrsbnxzT5eiWA8jXdqNXaXKmyzjX2bvi00jwNXUDGo';
 
 export function formatPence(pence: number): string {
   return `£${(pence / 100).toLocaleString('en-GB', {
