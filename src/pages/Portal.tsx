@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ShieldCheck, ArrowLeft, Upload, FileText, X, CheckCircle2,
   Clock, Eye, Lock, Loader2, Trash2, Download, Mail,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { COMPANY, formatPence, PRICING_TABLE } from '@/lib/config';
+import { COMPANY, formatPence, PRICING_TABLE, STRIPE_PRICE_IDS } from '@/lib/config';
 import { toast } from 'sonner';
 
 // ─── Google Ads conversion ───
@@ -97,6 +97,7 @@ function getTokens(): Record<string, string> {
 
 // ─── Portal component ───
 const Portal: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [view, setView] = useState<'auth' | 'jobs'>('auth');
   const [email, setEmail] = useState('');
   const [authing, setAuthing] = useState(false);
@@ -109,6 +110,56 @@ const Portal: React.FC = () => {
   const [selectedPacks, setSelectedPacks] = useState<JobPack[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [form, setForm] = useState({ serviceType: 'sar', description: '' });
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [jobAfterPayment, setJobAfterPayment] = useState(false);
+
+  // ── Handle Stripe redirect back (success) ──
+  useEffect(() => {
+    const status = searchParams.get('status');
+    if (status === 'success') {
+      const serviceType = searchParams.get('service') ?? 'sar';
+      const emailFromUrl = searchParams.get('email') ?? '';
+      if (emailFromUrl) {
+        setEmail(emailFromUrl);
+        // Create the job now that payment is confirmed.
+        const createJobAfterPayment = async () => {
+          try {
+            const { data, error } = await supabase.functions.invoke('redact-portal', {
+              body: {
+                action: 'create-job',
+                email: emailFromUrl,
+                service_type: serviceType,
+                description: 'Payment confirmed via Stripe.',
+              },
+            });
+            if (error || !data?.ok) {
+              toast.error('Payment received but could not create the job — please contact us.');
+              return;
+            }
+            const job: Job = data.job;
+            if (job.access_token) saveToken(job.id, job.access_token);
+            setJobs((arr) => [{ ...job, access_token: undefined }, ...arr]);
+            setSelectedJobId(job.id);
+            setSelectedFiles([]);
+            setSelectedPacks([]);
+            setView('jobs');
+            setShowForm(false);
+            setPaymentSuccess(true);
+            setJobAfterPayment(true);
+            // ── Fire Google Ads conversion ONLY after backend confirms save ──
+            fireConversion(job.id);
+            toast.success('Payment received', { description: `${job.reference} — upload your files below.` });
+          } catch {
+            toast.error('Payment received but could not create the job — please contact us.');
+          }
+        };
+        createJobAfterPayment();
+      }
+    } else if (status === 'cancelled') {
+      toast('Payment cancelled', { description: 'You were not charged. Try again when you\'re ready.' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // ── Auth: load jobs by email ──
   const handleAuth = async (e: React.FormEvent) => {
@@ -135,7 +186,7 @@ const Portal: React.FC = () => {
     setAuthing(false);
   };
 
-  // ── Create job ──
+  // ── Create job (redirect to Stripe checkout) ──
   const createJob = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !email.includes('@')) {
@@ -146,32 +197,31 @@ const Portal: React.FC = () => {
       toast.error('Add a short description of what needs redacting');
       return;
     }
+    const priceId = STRIPE_PRICE_IDS[form.serviceType];
+    if (!priceId) {
+      toast.error('This service requires a custom quote — please contact us.');
+      return;
+    }
     setCreating(true);
     try {
-      const { data, error } = await supabase.functions.invoke('redact-portal', {
+      // Create a Stripe Checkout Session via the edge function.
+      const { data, error } = await supabase.functions.invoke('stripe-checkout', {
         body: {
-          action: 'create-job',
+          action: 'create-checkout-session',
+          service_id: form.serviceType,
           email: email.trim().toLowerCase(),
-          service_type: form.serviceType,
           description: form.description.trim(),
+          success_url: `${window.location.origin}/portal?status=success&service=${form.serviceType}&email=${encodeURIComponent(email.trim().toLowerCase())}`,
+          cancel_url: `${window.location.origin}/portal?status=cancelled`,
         },
       });
-      if (error || !data?.ok) {
-        toast.error('Could not create the job', { description: data?.error ?? error?.message ?? 'Please try again.' });
+      if (error || !data?.ok || !data?.url) {
+        toast.error('Could not start payment', { description: data?.error ?? error?.message ?? 'Please try again.' });
         setCreating(false);
         return;
       }
-      const job: Job = data.job;
-      if (job.access_token) saveToken(job.id, job.access_token);
-      setJobs((arr) => [{ ...job, access_token: undefined }, ...arr]);
-      setForm({ serviceType: 'sar', description: '' });
-      setShowForm(false);
-      setSelectedJobId(job.id);
-      setSelectedFiles([]);
-      setSelectedPacks([]);
-      toast.success('Enquiry submitted', { description: `${job.reference} — we'll email you to confirm pricing.` });
-      // ── Fire Google Ads conversion ONLY after backend confirms save ──
-      fireConversion(job.id);
+      // Redirect to Stripe Checkout.
+      window.location.href = data.url;
     } catch {
       toast.error('Something went wrong — please try again.');
     }
@@ -402,7 +452,7 @@ const Portal: React.FC = () => {
             <button type="submit" disabled={creating}
               className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-semibold rounded-lg transition-colors">
               {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              {creating ? 'Submitting…' : 'Submit enquiry'}
+              {creating ? 'Redirecting to payment…' : 'Continue to payment'}
             </button>
           </form>
         )}
