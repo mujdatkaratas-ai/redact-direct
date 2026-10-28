@@ -1,32 +1,34 @@
-// Redact Direct — Portal API edge function.
+// Redact Direct — Secure Portal API (v2)
 //
-// Handles all client-facing operations with server-side ownership enforcement.
-// Clients identify by email + access_token (issued per job). No Supabase Auth.
+// Email-verified, session-based access. No access tokens returned to the client.
+// All job/file/pack operations require a valid session token + email ownership.
 //
 // Actions:
-//   { action: 'create-job', email, service_type, description }
-//     → creates a redact_jobs row, returns job + access_token
-//     → fires notification email to admin@redactdirect.co.uk
+//   { action: 'request-code', email }
+//     → Generates a 6-digit code, emails it, rate-limits (3 per 10 min).
+//     → Generic response regardless of whether the email exists.
 //
-//   { action: 'load-jobs', email }
-//     → returns all jobs for that email (without access_tokens)
+//   { action: 'verify-code', email, code }
+//     → Verifies the code, creates a session, returns { session_token, expires_at }.
+//     → Rate-limits verification attempts (5 per 10 min).
 //
-//   { action: 'load-job', job_id, access_token }
-//     → returns a single job + its files + packs (verifies ownership)
+//   { action: 'load-jobs', session_token }
+//     → Returns jobs for the session's email. No access_tokens in response.
 //
-//   { action: 'upload-file', job_id, access_token, file_name, file_size }
-//     → creates a redact_files row + returns a signed upload URL
+//   { action: 'load-job', session_token, job_id }
+//     → Returns job + files + packs (verifies email ownership).
 //
-//   { action: 'list-files', job_id, access_token }
-//     → returns files for a job (verifies ownership)
+//   { action: 'upload-file', session_token, job_id, file_name, file_data, content_type }
+//     → Verifies ownership, uploads file to storage, records it.
 //
-//   { action: 'download-pack', pack_id, access_token }
-//     → returns a signed download URL (verifies ownership)
+//   { action: 'delete-file', session_token, file_id }
+//     → Verifies ownership, deletes file.
 //
-//   { action: 'delete-file', file_id, access_token }
-//     → deletes a file (verifies ownership)
+//   { action: 'download-pack', session_token, pack_id }
+//     → Verifies ownership, returns short-lived signed download URL.
 //
-// Ownership is enforced by checking that access_token matches the job's token.
+//   { action: 'sign-out', session_token }
+//     → Deletes the session.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
@@ -56,6 +58,20 @@ function esc(s: unknown): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function generateCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function generateToken(): string {
+  return crypto.randomUUID() + crypto.randomUUID();
+}
+
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CODE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_CODE_REQUESTS = 3;
+const MAX_VERIFY_ATTEMPTS = 5;
+const RATE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
 async function sendEmail(to: string, subject: string, html: string, text: string) {
   if (!RESEND_API_KEY) return { ok: false, error: "RESEND_API_KEY not set" };
   for (const from of [FROM_ADDRESS, TEST_FROM]) {
@@ -68,10 +84,10 @@ async function sendEmail(to: string, subject: string, html: string, text: string
         },
         body: JSON.stringify({ from, to: [to], reply_to: ADMIN_EMAIL, subject, html, text }),
       });
-      if (res.ok) return { ok: true, status: res.status };
+      if (res.ok) return { ok: true };
       const body = await res.text();
       if (res.status === 403 && /not verified/i.test(body)) continue;
-      return { ok: false, status: res.status, error: body.slice(0, 200) };
+      return { ok: false, error: body.slice(0, 200) };
     } catch (e) {
       return { ok: false, error: String(e).slice(0, 200) };
     }
@@ -79,32 +95,38 @@ async function sendEmail(to: string, subject: string, html: string, text: string
   return { ok: false, error: "Both senders failed" };
 }
 
-/** Verify that access_token matches the job. Returns the job row or null. */
-async function verifyOwnership(jobId: string, accessToken: string) {
+/** Verify a session token and return the email, or null if invalid/expired. */
+async function verifySession(token: string): Promise<string | null> {
+  if (!token) return null;
+  const { data, error } = await supabase
+    .from("redact_sessions")
+    .select("email, session_expires_at, verified")
+    .eq("session_token", token)
+    .maybeSingle();
+  if (error || !data) return null;
+  if (!data.verified) return null;
+  if (new Date(data.session_expires_at) < new Date()) return null;
+  return data.email as string;
+}
+
+/** Verify that the session email owns the job. */
+async function verifyJobOwnership(jobId: string, email: string): Promise<Record<string, unknown> | null> {
   const { data, error } = await supabase
     .from("redact_jobs")
     .select("*")
     .eq("id", jobId)
-    .eq("access_token", accessToken)
+    .eq("email", email)
     .maybeSingle();
   if (error || !data) return null;
   return data;
 }
 
 const PRICES: Record<string, number> = {
-  document: 7500,
-  sar: 25000,
-  complex: 50000,
-  cctv: 1000,
-  managed: 75000,
+  document: 7500, sar: 25000, complex: 50000, cctv: 1000, managed: 75000,
 };
-
 const SERVICE_LABELS: Record<string, string> = {
-  document: "Document redaction",
-  sar: "Full SAR redaction",
-  complex: "Complex safeguarding SAR",
-  cctv: "CCTV redaction",
-  managed: "Fully managed SAR",
+  document: "Document redaction", sar: "Full SAR redaction",
+  complex: "Complex safeguarding SAR", cctv: "CCTV redaction", managed: "Fully managed SAR",
 };
 
 Deno.serve(async (req: Request) => {
@@ -112,7 +134,6 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // Auth: require the Supabase anon key in the Authorization header
   const authHeader = req.headers.get("Authorization") ?? "";
   if (!authHeader.startsWith("Bearer ")) {
     return json({ ok: false, error: "Unauthorized" }, 401);
@@ -127,125 +148,166 @@ Deno.serve(async (req: Request) => {
 
   const action = String(body.action ?? "");
 
-  // ── create-job ──
-  if (action === "create-job") {
+  // ── request-code ──
+  if (action === "request-code") {
     const email = String(body.email ?? "").trim().toLowerCase();
-    const serviceType = String(body.service_type ?? "").trim();
-    const description = String(body.description ?? "").trim();
-
     if (!email || !email.includes("@")) {
-      return json({ ok: false, error: "A valid email address is required" }, 400);
-    }
-    if (!serviceType || !PRICES[serviceType]) {
-      return json({ ok: false, error: "Select a service type" }, 400);
-    }
-    if (!description) {
-      return json({ ok: false, error: "Add a short description of what needs redacting" }, 400);
+      return json({ ok: false, error: "A valid email is required" }, 400);
     }
 
-    const pricePence = PRICES[serviceType];
-    const serviceLabel = SERVICE_LABELS[serviceType] ?? "Document redaction";
-    const reference = `RD-${Date.now().toString().slice(-8)}`;
+    // Rate limit: count requests in the last 10 minutes.
+    const tenMinAgo = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
+    const { count } = await supabase
+      .from("redact_sessions")
+      .select("*", { count: "exact", head: true })
+      .eq("email", email)
+      .gte("created_at", tenMinAgo);
 
-    // Insert the job — access_token is auto-generated by the DEFAULT.
-    const { data, error } = await supabase
-      .from("redact_jobs")
-      .insert({
-        reference,
-        email,
-        service_type: serviceLabel,
-        description,
-        status: "pending",
-        file_count: 0,
-        price_pence: pricePence,
-        paid: false,
-      })
-      .select("*")
-      .single();
-
-    if (error || !data) {
-      return json({ ok: false, error: "Could not create the job — please try again" }, 500);
+    if ((count ?? 0) >= MAX_CODE_REQUESTS) {
+      return json({ ok: false, error: "Too many requests. Please try again later." }, 429);
     }
 
-    const job = data as {
-      id: string;
-      reference: string;
-      email: string;
-      service_type: string;
-      description: string;
-      status: string;
-      file_count: number;
-      price_pence: number;
-      access_token: string;
-      created_at: string;
-    };
+    const code = generateCode();
+    const codeExpiresAt = new Date(Date.now() + CODE_DURATION_MS).toISOString();
+    const sessionToken = generateToken();
+    const sessionExpiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
 
-    // Notify admin.
-    const subject = `New redaction enquiry: ${job.reference} (${job.email})`;
-    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1f2937;max-width:620px;margin:0 auto;padding:24px">
+    // Create a new session row (unverified until code is entered).
+    const { error: insertErr } = await supabase.from("redact_sessions").insert({
+      email,
+      session_token: sessionToken,
+      code_hash: code, // Store the code directly (service role only; RLS blocks client access).
+      code_expires_at: codeExpiresAt,
+      code_used: false,
+      code_attempts: 0,
+      code_requests: (count ?? 0) + 1,
+      first_request_at: new Date().toISOString(),
+      verified: false,
+      session_expires_at: sessionExpiresAt,
+    });
+
+    if (insertErr) {
+      return json({ ok: false, error: "Could not send verification code" }, 500);
+    }
+
+    // Email the code. Best-effort — never reveal whether the email has an account.
+    const subject = "Your Redact Direct verification code";
+    const emailHtml = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1f2937;max-width:480px;margin:0 auto;padding:24px">
   <div style="border-left:4px solid #0f172a;padding:8px 16px;margin-bottom:20px">
     <div style="font-size:11px;color:#0f172a;font-weight:700;letter-spacing:1px;text-transform:uppercase">Redact Direct</div>
-    <h2 style="margin:6px 0 0">${esc(subject)}</h2>
+    <h2 style="margin:6px 0 0">Verification code</h2>
   </div>
-  <table style="border-collapse:collapse;font-size:14px;margin:16px 0">
-    <tr><td style="padding:6px 12px 6px 0;color:#6b7280">Reference</td><td style="font-weight:600">${esc(job.reference)}</td></tr>
-    <tr><td style="padding:6px 12px 6px 0;color:#6b7280">Email</td><td style="font-weight:600">${esc(job.email)}</td></tr>
-    <tr><td style="padding:6px 12px 6px 0;color:#6b7280">Service</td><td style="font-weight:600">${esc(job.service_type)}</td></tr>
-    <tr><td style="padding:6px 12px 6px 0;color:#6b7280">Price</td><td style="font-weight:600">£${(job.price_pence / 100).toFixed(2)}</td></tr>
-    <tr><td style="padding:6px 12px 6px 0;color:#6b7280;vertical-align:top">Description</td><td>${esc(job.description)}</td></tr>
-  </table>
-  <p style="margin-top:20px">A new enquiry has been submitted. Contact the client to confirm pricing and collect the documents.</p>
-  <p style="color:#6b7280;font-size:13px;margin-top:28px">Redact Direct · ${esc(ADMIN_EMAIL)}</p>
+  <p style="font-size:32px;font-weight:800;letter-spacing:8px;text-align:center;margin:24px 0">${esc(code)}</p>
+  <p style="text-align:center;color:#6b7280;font-size:14px">This code expires in 10 minutes.</p>
+  <p style="text-align:center;color:#6b7280;font-size:14px;margin-top:8px">If you did not request this code, you can safely ignore this email.</p>
   </body></html>`;
-    const text = `${subject}\n\nReference: ${job.reference}\nEmail: ${job.email}\nService: ${job.service_type}\nPrice: £${(job.price_pence / 100).toFixed(2)}\nDescription: ${job.description}`;
+    const emailText = `Redact Direct — Your verification code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.`;
 
-    sendEmail(ADMIN_EMAIL, subject, html, text).catch(() => {});
+    sendEmail(email, subject, emailHtml, emailText).catch(() => {});
 
-    // Return the job WITHOUT the access_token in the response body.
-    // The client stores the access_token in localStorage for their session.
+    // Generic response — never reveal whether the email has an account.
+    return json({ ok: true, message: "If an account exists for that email, a verification code has been sent." });
+  }
+
+  // ── verify-code ──
+  if (action === "verify-code") {
+    const email = String(body.email ?? "").trim().toLowerCase();
+    const code = String(body.code ?? "").trim();
+    if (!email || !code) {
+      return json({ ok: false, error: "Email and code are required" }, 400);
+    }
+
+    // Find the most recent unverified session for this email with an unexpired code.
+    const { data: session, error: sessionErr } = await supabase
+      .from("redact_sessions")
+      .select("*")
+      .eq("email", email)
+      .eq("verified", false)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (sessionErr || !session) {
+      return json({ ok: false, error: "Invalid or expired code" }, 400);
+    }
+
+    // Rate limit verification attempts.
+    if ((session.code_attempts ?? 0) >= MAX_VERIFY_ATTEMPTS) {
+      return json({ ok: false, error: "Too many attempts. Please request a new code." }, 429);
+    }
+
+    // Check if the code has expired.
+    if (new Date(session.code_expires_at) < new Date()) {
+      return json({ ok: false, error: "Code expired. Please request a new one." }, 400);
+    }
+
+    // Increment attempts.
+    await supabase
+      .from("redact_sessions")
+      .update({ code_attempts: (session.code_attempts ?? 0) + 1 })
+      .eq("id", session.id);
+
+    // Verify the code.
+    if (session.code_hash !== code) {
+      return json({ ok: false, error: "Invalid code" }, 400);
+    }
+
+    // Mark as verified and set session expiry.
+    const sessionExpiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
+    await supabase
+      .from("redact_sessions")
+      .update({
+        verified: true,
+        code_used: true,
+        code_hash: null, // Don't keep the code after verification.
+        session_expires_at: sessionExpiresAt,
+      })
+      .eq("id", session.id);
+
     return json({
       ok: true,
-      job: {
-        id: job.id,
-        reference: job.reference,
-        email: job.email,
-        service_type: job.service_type,
-        description: job.description,
-        status: job.status,
-        file_count: job.file_count,
-        price_pence: job.price_pence,
-        access_token: job.access_token,
-        created_at: job.created_at,
-      },
+      session_token: session.session_token,
+      expires_at: sessionExpiresAt,
+      email,
     });
   }
 
-  // ── load-jobs (by email) ──
-  if (action === "load-jobs") {
-    const email = String(body.email ?? "").trim().toLowerCase();
-    if (!email) return json({ ok: false, error: "Email is required" }, 400);
+  // ── sign-out ──
+  if (action === "sign-out") {
+    const token = String(body.session_token ?? "");
+    if (token) {
+      await supabase.from("redact_sessions").delete().eq("session_token", token);
+    }
+    return json({ ok: true });
+  }
 
+  // ── All remaining actions require a valid session ──
+  const sessionToken = String(body.session_token ?? "");
+  const sessionEmail = await verifySession(sessionToken);
+  if (!sessionEmail) {
+    return json({ ok: false, error: "Session expired or invalid. Please sign in again." }, 401);
+  }
+
+  // ── load-jobs ──
+  if (action === "load-jobs") {
     const { data, error } = await supabase
       .from("redact_jobs")
-      .select("id, reference, email, service_type, description, status, file_count, price_pence, access_token, created_at")
-      .eq("email", email)
+      .select("id, reference, email, service_type, description, status, file_count, price_pence, paid, stripe_session_id, created_at")
+      .eq("email", sessionEmail)
       .order("created_at", { ascending: false });
 
     if (error) return json({ ok: false, error: error.message }, 500);
 
-    // Return access_tokens so the client can use them for file/pack access.
-    // The email match already proves ownership.
-    return json({ ok: true, jobs: data ?? [] });
+    return json({ ok: true, jobs: data ?? [], email: sessionEmail });
   }
 
-  // ── load-job (by id + access_token) ──
+  // ── load-job ──
   if (action === "load-job") {
     const jobId = String(body.job_id ?? "").trim();
-    const accessToken = String(body.access_token ?? "").trim();
-    if (!jobId || !accessToken) return json({ ok: false, error: "Job ID and access token required" }, 400);
+    if (!jobId) return json({ ok: false, error: "Job ID required" }, 400);
 
-    const job = await verifyOwnership(jobId, accessToken);
-    if (!job) return json({ ok: false, error: "Job not found or access denied" }, 404);
+    const job = await verifyJobOwnership(jobId, sessionEmail);
+    if (!job) return json({ ok: false, error: "Job not found" }, 404);
 
     const [filesRes, packsRes] = await Promise.all([
       supabase.from("redact_files").select("*").eq("job_id", jobId).order("uploaded_at", { ascending: false }),
@@ -255,14 +317,10 @@ Deno.serve(async (req: Request) => {
     return json({
       ok: true,
       job: {
-        id: job.id,
-        reference: job.reference,
-        email: job.email,
-        service_type: job.service_type,
-        description: job.description,
-        status: job.status,
-        file_count: job.file_count,
-        price_pence: job.price_pence,
+        id: job.id, reference: job.reference, email: job.email,
+        service_type: job.service_type, description: job.description,
+        status: job.status, file_count: job.file_count,
+        price_pence: job.price_pence, paid: job.paid,
         created_at: job.created_at,
       },
       files: filesRes.data ?? [],
@@ -270,25 +328,22 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // ── upload-file (accept file as base64, upload server-side) ──
+  // ── upload-file ──
   if (action === "upload-file") {
     const jobId = String(body.job_id ?? "").trim();
-    const accessToken = String(body.access_token ?? "").trim();
     const fileName = String(body.file_name ?? "").trim();
-    const fileSize = Number(body.file_size ?? 0);
-    const fileData = String(body.file_data ?? ""); // base64-encoded file content
+    const fileData = String(body.file_data ?? "");
     const contentType = String(body.content_type ?? "application/octet-stream");
 
-    if (!jobId || !accessToken || !fileName) {
-      return json({ ok: false, error: "Job ID, access token, and file name required" }, 400);
+    if (!jobId || !fileName || !fileData) {
+      return json({ ok: false, error: "Job ID, file name, and file data required" }, 400);
     }
 
-    const job = await verifyOwnership(jobId, accessToken);
+    const job = await verifyJobOwnership(jobId, sessionEmail);
     if (!job) return json({ ok: false, error: "Access denied" }, 403);
 
     const storagePath = `${jobId}/${Date.now()}-${fileName}`;
 
-    // Decode base64 and upload to storage using the service role key.
     let fileBytes: Uint8Array;
     try {
       const cleanBase64 = fileData.replace(/^data:[^;]+;base64,/, "");
@@ -298,31 +353,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const { error: upErr } = await supabase
-      .storage
-      .from(BUCKET)
-      .upload(storagePath, fileBytes, { contentType, upsert: false });
+      .storage.from(BUCKET).upload(storagePath, fileBytes, { contentType, upsert: false });
 
-    if (upErr) {
-      return json({ ok: false, error: "Could not upload the file — please try again" }, 500);
-    }
+    if (upErr) return json({ ok: false, error: "Could not upload the file" }, 500);
 
-    // Insert the file record.
     const { error: fileErr } = await supabase
       .from("redact_files")
-      .insert({
-        job_id: jobId,
-        file_name: fileName,
-        storage_path: storagePath,
-        file_size: fileBytes.byteLength,
-      });
+      .insert({ job_id: jobId, file_name: fileName, storage_path: storagePath, file_size: fileBytes.byteLength });
 
     if (fileErr) {
-      // Clean up the orphaned file in storage.
       await supabase.storage.from(BUCKET).remove([storagePath]);
       return json({ ok: false, error: "Could not record the file" }, 500);
     }
 
-    // Update file_count on the job.
     await supabase
       .from("redact_jobs")
       .update({ file_count: (job.file_count ?? 0) + 1, updated_at: new Date().toISOString() })
@@ -331,51 +374,20 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, file_name: fileName, file_size: fileBytes.byteLength });
   }
 
-  // ── list-files ──
-  if (action === "list-files") {
-    const jobId = String(body.job_id ?? "").trim();
-    const accessToken = String(body.access_token ?? "").trim();
-    if (!jobId || !accessToken) return json({ ok: false, error: "Job ID and access token required" }, 400);
-
-    const job = await verifyOwnership(jobId, accessToken);
-    if (!job) return json({ ok: false, error: "Access denied" }, 403);
-
-    const { data, error } = await supabase
-      .from("redact_files")
-      .select("*")
-      .eq("job_id", jobId)
-      .order("uploaded_at", { ascending: false });
-
-    if (error) return json({ ok: false, error: error.message }, 500);
-
-    return json({ ok: true, files: data ?? [] });
-  }
-
   // ── delete-file ──
   if (action === "delete-file") {
     const fileId = String(body.file_id ?? "").trim();
-    const accessToken = String(body.access_token ?? "").trim();
-    if (!fileId || !accessToken) return json({ ok: false, error: "File ID and access token required" }, 400);
+    if (!fileId) return json({ ok: false, error: "File ID required" }, 400);
 
-    // Get the file, then verify ownership via the job.
     const { data: file } = await supabase
-      .from("redact_files")
-      .select("*")
-      .eq("id", fileId)
-      .maybeSingle();
-
+      .from("redact_files").select("*").eq("id", fileId).maybeSingle();
     if (!file) return json({ ok: false, error: "File not found" }, 404);
 
-    const job = await verifyOwnership(file.job_id, accessToken);
+    const job = await verifyJobOwnership(file.job_id, sessionEmail);
     if (!job) return json({ ok: false, error: "Access denied" }, 403);
 
-    // Remove from storage.
     await supabase.storage.from(BUCKET).remove([file.storage_path]);
-
-    // Delete the record.
     await supabase.from("redact_files").delete().eq("id", fileId);
-
-    // Decrement file_count.
     await supabase
       .from("redact_jobs")
       .update({ file_count: Math.max(0, (job.file_count ?? 0) - 1), updated_at: new Date().toISOString() })
@@ -387,37 +399,25 @@ Deno.serve(async (req: Request) => {
   // ── download-pack ──
   if (action === "download-pack") {
     const packId = String(body.pack_id ?? "").trim();
-    const accessToken = String(body.access_token ?? "").trim();
-    if (!packId || !accessToken) return json({ ok: false, error: "Pack ID and access token required" }, 400);
+    if (!packId) return json({ ok: false, error: "Pack ID required" }, 400);
 
     const { data: pack } = await supabase
-      .from("redact_packs")
-      .select("*")
-      .eq("id", packId)
-      .maybeSingle();
-
+      .from("redact_packs").select("*").eq("id", packId).maybeSingle();
     if (!pack) return json({ ok: false, error: "Pack not found" }, 404);
 
-    const job = await verifyOwnership(pack.job_id, accessToken);
+    const job = await verifyJobOwnership(pack.job_id, sessionEmail);
     if (!job) return json({ ok: false, error: "Access denied" }, 403);
 
-    // Create a signed download URL (60 seconds).
     const { data: urlData, error: urlErr } = await supabase
-      .storage
-      .from(BUCKET)
-      .createSignedUrl(pack.storage_path, 60);
+      .storage.from(BUCKET).createSignedUrl(pack.storage_path, 60);
 
     if (urlErr || !urlData?.signedUrl) {
       return json({ ok: false, error: "Could not create download link" }, 500);
     }
 
-    // Update download count.
     await supabase
       .from("redact_packs")
-      .update({
-        download_count: (pack.download_count ?? 0) + 1,
-        last_downloaded_at: new Date().toISOString(),
-      })
+      .update({ download_count: (pack.download_count ?? 0) + 1, last_downloaded_at: new Date().toISOString() })
       .eq("id", packId);
 
     return json({ ok: true, url: urlData.signedUrl });

@@ -75,6 +75,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // Create the Stripe Checkout Session.
+    // Email and description go into metadata — NOT into the success URL.
+    // The webhook reads them from the Stripe session, not the browser.
     const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
@@ -87,10 +89,12 @@ Deno.serve(async (req: Request) => {
         "line_items[0][quantity]": "1",
         "customer_email": email,
         "metadata[service_id]": serviceId,
-        "metadata[description]": description.slice(0, 500),
         "metadata[email]": email,
-        "success_url": `${body.success_url ?? "https://redactdirect.co.uk/portal?status=success"}`,
-        "cancel_url": `${body.cancel_url ?? "https://redactdirect.co.uk/portal?status=cancelled"}`,
+        "metadata[description]": description.slice(0, 500),
+        // No email in the URL — just the Stripe session ID for reference.
+        // The webhook creates the job using the metadata, not the URL.
+        "success_url": "https://redactdirect.co.uk/portal?status=success",
+        "cancel_url": "https://redactdirect.co.uk/portal?status=cancelled",
       }).toString(),
     });
 

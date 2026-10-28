@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  ShieldCheck, ArrowLeft, Upload, FileText, X, CheckCircle2,
-  Clock, Eye, Lock, Loader2, Trash2, Download, Mail,
+  ArrowLeft, Upload, FileText, X, CheckCircle2, Eye, Lock, Loader2,
+  Download, Mail, KeyRound,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { COMPANY, formatPence, PRICING_TABLE, STRIPE_PRICE_IDS } from '@/lib/config';
@@ -24,20 +24,16 @@ function fireConversion(transactionId: string) {
       send_to: ADS_CONVERSION_ID,
       transaction_id: transactionId,
     });
-  } catch {
-    /* never block the UX on tracking */
-  }
+  } catch { /* never block the UX on tracking */ }
 }
 
 // ─── Types ───
 type JobStatus = 'pending' | 'in_review' | 'ready';
+type View = 'email' | 'code' | 'jobs';
 
 const STATUS_LABEL: Record<JobStatus, string> = {
-  pending: 'Awaiting review',
-  in_review: 'In review',
-  ready: 'Pack ready',
+  pending: 'Awaiting review', in_review: 'In review', ready: 'Pack ready',
 };
-
 const STATUS_TONE: Record<JobStatus, string> = {
   pending: 'bg-amber-100 text-amber-700',
   in_review: 'bg-blue-100 text-blue-700',
@@ -45,62 +41,43 @@ const STATUS_TONE: Record<JobStatus, string> = {
 };
 
 interface Job {
-  id: string;
-  reference: string;
-  email: string;
-  service_type: string;
-  description: string;
-  status: JobStatus;
-  file_count: number;
-  price_pence: number;
-  access_token?: string;
-  created_at: string;
+  id: string; reference: string; email: string;
+  service_type: string; description: string; status: JobStatus;
+  file_count: number; price_pence: number; created_at: string;
 }
-
 interface JobFile {
-  id: string;
-  job_id: string;
-  file_name: string;
-  storage_path: string;
-  file_size: number | null;
-  uploaded_at: string;
+  id: string; job_id: string; file_name: string;
+  storage_path: string; file_size: number | null; uploaded_at: string;
 }
-
 interface JobPack {
-  id: string;
-  job_id: string;
-  file_name: string;
-  storage_path: string;
-  file_size: number | null;
-  uploaded_at: string;
-  download_count: number;
+  id: string; job_id: string; file_name: string;
+  storage_path: string; file_size: number | null;
+  uploaded_at: string; download_count: number;
 }
 
-// ─── Helpers ───
-const TOKEN_KEY = 'rd_access_tokens';
+// ─── Session storage (NOT access tokens) ───
+const SESSION_KEY = 'rd_session';
 
-function saveToken(jobId: string, token: string) {
-  try {
-    const existing = JSON.parse(localStorage.getItem(TOKEN_KEY) ?? '{}');
-    existing[jobId] = token;
-    localStorage.setItem(TOKEN_KEY, JSON.stringify(existing));
-  } catch { /* localStorage unavailable */ }
+function saveSession(token: string, email: string) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ token, email })); } catch { /* */ }
 }
-
-function getTokens(): Record<string, string> {
+function getSession(): { token: string; email: string } | null {
   try {
-    return JSON.parse(localStorage.getItem(TOKEN_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* */ }
 }
 
 // ─── Portal component ───
 const Portal: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const [view, setView] = useState<'auth' | 'jobs'>('auth');
+  const [view, setView] = useState<View>('email');
   const [email, setEmail] = useState('');
-  const [authing, setAuthing] = useState(false);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -111,49 +88,16 @@ const Portal: React.FC = () => {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [form, setForm] = useState({ serviceType: 'sar', description: '' });
   const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [jobAfterPayment, setJobAfterPayment] = useState(false);
 
-  // ── Handle Stripe redirect back (success) ──
-  useEffect(() => {
+  // ── Handle Stripe redirect (no email in URL, no job creation here) ──
+  React.useEffect(() => {
     const status = searchParams.get('status');
     if (status === 'success') {
-      const serviceType = searchParams.get('service') ?? 'sar';
-      const emailFromUrl = searchParams.get('email') ?? '';
-      if (emailFromUrl) {
-        setEmail(emailFromUrl);
-        // Create the job now that payment is confirmed.
-        const createJobAfterPayment = async () => {
-          try {
-            const { data, error } = await supabase.functions.invoke('redact-portal', {
-              body: {
-                action: 'create-job',
-                email: emailFromUrl,
-                service_type: serviceType,
-                description: 'Payment confirmed via Stripe.',
-              },
-            });
-            if (error || !data?.ok) {
-              toast.error('Payment received but could not create the job — please contact us.');
-              return;
-            }
-            const job: Job = data.job;
-            if (job.access_token) saveToken(job.id, job.access_token);
-            setJobs((arr) => [{ ...job, access_token: undefined }, ...arr]);
-            setSelectedJobId(job.id);
-            setSelectedFiles([]);
-            setSelectedPacks([]);
-            setView('jobs');
-            setShowForm(false);
-            setPaymentSuccess(true);
-            setJobAfterPayment(true);
-            // ── Fire Google Ads conversion ONLY after backend confirms save ──
-            fireConversion(job.id);
-            toast.success('Payment received', { description: `${job.reference} — upload your files below.` });
-          } catch {
-            toast.error('Payment received but could not create the job — please contact us.');
-          }
-        };
-        createJobAfterPayment();
+      setPaymentSuccess(true);
+      // If already authenticated, reload jobs to pick up the new one.
+      const session = getSession();
+      if (session) {
+        loadJobs(session.token);
       }
     } else if (status === 'cancelled') {
       toast('Payment cancelled', { description: 'You were not charged. Try again when you\'re ready.' });
@@ -161,43 +105,94 @@ const Portal: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // ── Auth: load jobs by email ──
-  const handleAuth = async (e: React.FormEvent) => {
+  // ── Auto-restore session if already signed in ──
+  React.useEffect(() => {
+    const session = getSession();
+    if (session) {
+      setView('jobs');
+      setEmail(session.email);
+      loadJobs(session.token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Request verification code ──
+  const requestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !email.includes('@')) {
       toast.error('Enter a valid email address');
       return;
     }
-    setAuthing(true);
+    setBusy(true);
     try {
       const { data, error } = await supabase.functions.invoke('redact-portal', {
-        body: { action: 'load-jobs', email: email.trim().toLowerCase() },
+        body: { action: 'request-code', email: email.trim().toLowerCase() },
       });
       if (error || !data?.ok) {
-        toast.error('Could not load your jobs', { description: error?.message ?? 'Please try again.' });
-        setAuthing(false);
+        toast.error('Could not send verification code', { description: data?.error ?? 'Please try again.' });
+        setBusy(false);
         return;
       }
-      // Save access tokens for all jobs returned
-      const jobs = data.jobs ?? [];
-      for (const j of jobs) {
-        if (j.access_token) saveToken(j.id, j.access_token);
-      }
-      setJobs(jobs.map((j: Job) => ({ ...j, access_token: undefined })));
-      setView('jobs');
+      setView('code');
+      toast.success('Verification code sent', { description: 'Check your email for a 6-digit code.' });
     } catch {
       toast.error('Something went wrong — please try again.');
     }
-    setAuthing(false);
+    setBusy(false);
   };
 
-  // ── Create job (redirect to Stripe checkout) ──
-  const createJob = async (e: React.FormEvent) => {
+  // ── Verify code and create session ──
+  const verifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !email.includes('@')) {
-      toast.error('Enter your email address first');
+    if (!code.trim()) {
+      toast.error('Enter the 6-digit code from your email');
       return;
     }
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('redact-portal', {
+        body: { action: 'verify-code', email: email.trim().toLowerCase(), code: code.trim() },
+      });
+      if (error || !data?.ok) {
+        toast.error('Invalid code', { description: data?.error ?? 'Please try again or request a new code.' });
+        setBusy(false);
+        return;
+      }
+      saveSession(data.session_token, data.email);
+      setCode('');
+      setView('jobs');
+      await loadJobs(data.session_token);
+      if (paymentSuccess) {
+        toast.success('Payment received', { description: 'Your job is ready for file uploads.' });
+        setPaymentSuccess(false);
+      }
+    } catch {
+      toast.error('Something went wrong — please try again.');
+    }
+    setBusy(false);
+  };
+
+  // ── Load jobs (requires session) ──
+  const loadJobs = async (sessionToken: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('redact-portal', {
+        body: { action: 'load-jobs', session_token: sessionToken },
+      });
+      if (error || !data?.ok) {
+        clearSession();
+        setView('email');
+        toast.error('Session expired', { description: 'Please sign in again.' });
+        return;
+      }
+      setJobs(data.jobs ?? []);
+    } catch {
+      toast.error('Could not load your jobs');
+    }
+  };
+
+  // ── Create job → redirect to Stripe (no job created here) ──
+  const createJob = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!form.description.trim()) {
       toast.error('Add a short description of what needs redacting');
       return;
@@ -209,15 +204,12 @@ const Portal: React.FC = () => {
     }
     setCreating(true);
     try {
-      // Create a Stripe Checkout Session via the edge function.
       const { data, error } = await supabase.functions.invoke('stripe-checkout', {
         body: {
           action: 'create-checkout-session',
           service_id: form.serviceType,
-          email: email.trim().toLowerCase(),
+          email,
           description: form.description.trim(),
-          success_url: `${window.location.origin}/portal?status=success&service=${form.serviceType}&email=${encodeURIComponent(email.trim().toLowerCase())}`,
-          cancel_url: `${window.location.origin}/portal?status=cancelled`,
         },
       });
       if (error || !data?.ok || !data?.url) {
@@ -225,7 +217,6 @@ const Portal: React.FC = () => {
         setCreating(false);
         return;
       }
-      // Redirect to Stripe Checkout.
       window.location.href = data.url;
     } catch {
       toast.error('Something went wrong — please try again.');
@@ -233,71 +224,42 @@ const Portal: React.FC = () => {
     setCreating(false);
   };
 
-  // ── Load job detail (files + packs) ──
+  // ── Load job detail ──
   const loadJobDetail = useCallback(async (jobId: string) => {
-    const tokens = getTokens();
-    const token = tokens[jobId];
-    if (!token) {
-      setSelectedFiles([]);
-      setSelectedPacks([]);
-      return;
-    }
+    const session = getSession();
+    if (!session) { setSelectedFiles([]); setSelectedPacks([]); return; }
     setLoadingDetail(true);
     try {
       const { data, error } = await supabase.functions.invoke('redact-portal', {
-        body: { action: 'load-job', job_id: jobId, access_token: token },
+        body: { action: 'load-job', session_token: session.token, job_id: jobId },
       });
-      if (error || !data?.ok) {
-        setSelectedFiles([]);
-        setSelectedPacks([]);
-        return;
-      }
+      if (error || !data?.ok) { setSelectedFiles([]); setSelectedPacks([]); return; }
       setSelectedFiles(data.files ?? []);
       setSelectedPacks(data.packs ?? []);
-    } catch {
-      setSelectedFiles([]);
-      setSelectedPacks([]);
-    }
+    } catch { setSelectedFiles([]); setSelectedPacks([]); }
     setLoadingDetail(false);
   }, []);
 
   // ── Upload file ──
   const handleUpload = async (jobId: string, files: FileList) => {
-    const tokens = getTokens();
-    const token = tokens[jobId];
-    if (!token) {
-      toast.error('Access expired — please reload your jobs with your email.');
-      return;
-    }
+    const session = getSession();
+    if (!session) { toast.error('Session expired — please sign in again.'); return; }
     setUploading(true);
-    let success = 0;
-    let failed = 0;
+    let success = 0, failed = 0;
     for (const file of Array.from(files)) {
       try {
-        // Read file as base64 and send to the edge function for server-side upload.
         const arrayBuffer = await file.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
         let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
         const base64 = btoa(binary);
-
         const { data: upData, error: upErr } = await supabase.functions.invoke('redact-portal', {
-          body: {
-            action: 'upload-file',
-            job_id: jobId,
-            access_token: token,
-            file_name: file.name,
-            file_data: base64,
-            content_type: file.type || 'application/octet-stream',
-          },
+          body: { action: 'upload-file', session_token: session.token, job_id: jobId,
+            file_name: file.name, file_data: base64, content_type: file.type || 'application/octet-stream' },
         });
         if (upErr || !upData?.ok) { failed++; continue; }
         success++;
-      } catch {
-        failed++;
-      }
+      } catch { failed++; }
     }
     await loadJobDetail(jobId);
     setJobs((arr) => arr.map((j) => j.id === jobId ? { ...j, file_count: (j.file_count ?? 0) + success } : j));
@@ -306,34 +268,15 @@ const Portal: React.FC = () => {
     if (failed > 0) toast.error(`${failed} file${failed === 1 ? '' : 's'} failed to upload`);
   };
 
-  // ── Delete file ──
-  const deleteFile = async (file: JobFile) => {
-    const tokens = getTokens();
-    const token = tokens[file.job_id];
-    if (!token) { toast.error('Access expired'); return; }
-    if (!confirm(`Delete ${file.file_name}?`)) return;
-    try {
-      await supabase.functions.invoke('redact-portal', {
-        body: { action: 'delete-file', file_id: file.id, access_token: token },
-      });
-      setSelectedFiles((arr) => arr.filter((f) => f.id !== file.id));
-      toast('File removed');
-    } catch {
-      toast.error('Could not delete the file');
-    }
-  };
-
   // ── Download pack ──
   const downloadPack = async (pack: JobPack) => {
-    const tokens = getTokens();
-    const token = tokens[pack.job_id];
-    if (!token) { toast.error('Access expired — please reload your jobs with your email.'); return; }
+    const session = getSession();
+    if (!session) { toast.error('Session expired — please sign in again.'); return; }
     try {
       const { data, error } = await supabase.functions.invoke('redact-portal', {
-        body: { action: 'download-pack', pack_id: pack.id, access_token: token },
+        body: { action: 'download-pack', session_token: session.token, pack_id: pack.id },
       });
       if (error || !data?.ok) { toast.error('Could not generate the download link'); return; }
-      // Use a hidden anchor instead of window.open to avoid popup blockers
       const a = document.createElement('a');
       a.href = data.url;
       a.download = pack.file_name;
@@ -341,58 +284,90 @@ const Portal: React.FC = () => {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    } catch {
-      toast.error('Could not generate the download link');
+    } catch { toast.error('Could not generate the download link'); }
+  };
+
+  const signOut = async () => {
+    const session = getSession();
+    if (session) {
+      try { await supabase.functions.invoke('redact-portal', { body: { action: 'sign-out', session_token: session.token } }); } catch { /* */ }
     }
+    clearSession();
+    setView('email');
+    setEmail('');
+    setJobs([]);
+    setSelectedJobId(null);
   };
 
-  const selectJob = (job: Job) => {
-    setSelectedJobId(job.id);
-    loadJobDetail(job.id);
-  };
-
-  const selectedJob = jobs.find((j) => j.id === selectedJobId);
-
-  // ─── Render: auth view ───
-  if (view === 'auth') {
+  // ─── Render: email entry ───
+  if (view === 'email') {
     return (
       <div className="min-h-screen bg-slate-50">
         <header className="sticky top-0 z-50 bg-white border-b border-slate-200">
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <Link to="/" className="flex items-center gap-2">
-              <img src="/logo.png" alt="Redact Direct" className="h-8 w-auto" />
-            </Link>
-            <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900">
-              <ArrowLeft className="w-4 h-4" /> Back to home
-            </Link>
+          <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+            <Link to="/" className="flex items-center gap-2"><img src="/logo.png" alt="Redact Direct" className="h-8 w-auto" /></Link>
+            <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft className="w-4 h-4" /> Back to home</Link>
           </div>
         </header>
         <div className="max-w-md mx-auto px-4 py-20">
           <div className="bg-white rounded-xl border border-slate-200 p-8">
-            <div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center mb-6">
-              <Mail className="w-6 h-6 text-white" />
-            </div>
+            <div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center mb-6"><Mail className="w-6 h-6 text-white" /></div>
             <h1 className="text-2xl font-black text-slate-900 mb-2">Client portal</h1>
-            <p className="text-sm text-slate-500 mb-6">
-              Enter your email to view your redaction jobs, upload documents, and download finished packs.
-            </p>
-            <form onSubmit={handleAuth} className="space-y-4">
+            <p className="text-sm text-slate-500 mb-6">Enter your email to sign in. We'll send you a verification code.</p>
+            <form onSubmit={requestCode} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Email address</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-900"
                   placeholder="you@organisation.gov.uk" required />
               </div>
-              <button type="submit" disabled={authing}
+              <button type="submit" disabled={busy}
                 className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-semibold rounded-lg transition-colors">
-                {authing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowLeft className="w-4 h-4 rotate-180" />}
-                {authing ? 'Loading…' : 'View my jobs'}
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                {busy ? 'Sending…' : 'Send verification code'}
               </button>
             </form>
           </div>
-          <p className="text-center text-xs text-slate-400 mt-6">
-            New here? <button onClick={() => { setView('jobs'); setShowForm(true); }} className="text-slate-600 underline">Create a job</button> — enter your email in the form.
-          </p>
+          {paymentSuccess && (
+            <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+              <CheckCircle2 className="w-5 h-5 inline mr-2" /> Payment received! Sign in to upload your files.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Render: code entry ───
+  if (view === 'code') {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <header className="sticky top-0 z-50 bg-white border-b border-slate-200">
+          <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+            <Link to="/" className="flex items-center gap-2"><img src="/logo.png" alt="Redact Direct" className="h-8 w-auto" /></Link>
+            <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft className="w-4 h-4" /> Back to home</Link>
+          </div>
+        </header>
+        <div className="max-w-md mx-auto px-4 py-20">
+          <div className="bg-white rounded-xl border border-slate-200 p-8">
+            <div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center mb-6"><KeyRound className="w-6 h-6 text-white" /></div>
+            <h1 className="text-2xl font-black text-slate-900 mb-2">Enter your code</h1>
+            <p className="text-sm text-slate-500 mb-6">We sent a 6-digit code to <strong>{email}</strong>. It expires in 10 minutes.</p>
+            <form onSubmit={verifyCode} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Verification code</label>
+                <input type="text" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-900 text-center text-2xl tracking-widest"
+                  placeholder="000000" inputMode="numeric" maxLength={6} required />
+              </div>
+              <button type="submit" disabled={busy}
+                className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-semibold rounded-lg transition-colors">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                {busy ? 'Verifying…' : 'Verify and sign in'}
+              </button>
+            </form>
+            <button onClick={() => setView('email')} className="mt-4 text-sm text-slate-500 hover:text-slate-900">← Use a different email</button>
+          </div>
         </div>
       </div>
     );
@@ -402,20 +377,15 @@ const Portal: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="sticky top-0 z-50 bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <img src="/logo.png" alt="Redact Direct" className="h-8 w-auto" />
-          </Link>
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2"><img src="/logo.png" alt="Redact Direct" className="h-8 w-auto" /></Link>
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-400 hidden sm:inline">{email}</span>
-            <button onClick={() => setView('auth')} className="text-sm text-slate-500 hover:text-slate-900">Sign out</button>
-            <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900">
-              <ArrowLeft className="w-4 h-4" /> Home
-            </Link>
+            <button onClick={signOut} className="text-sm text-slate-500 hover:text-slate-900">Sign out</button>
+            <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft className="w-4 h-4" /> Home</Link>
           </div>
         </div>
       </header>
-
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -428,7 +398,6 @@ const Portal: React.FC = () => {
           </button>
         </div>
 
-        {/* New job form */}
         {showForm && (
           <form onSubmit={createJob} className="bg-white rounded-xl border border-slate-200 p-6 mb-8 space-y-5">
             <div className="flex items-center justify-between">
@@ -436,30 +405,17 @@ const Portal: React.FC = () => {
               <button type="button" onClick={() => setShowForm(false)}><X className="w-5 h-5 text-slate-400" /></button>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Your email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-900"
-                placeholder="you@organisation.gov.uk" required />
-              <p className="text-xs text-slate-400 mt-1.5">We'll use this to contact you about your job.</p>
-            </div>
-            <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Service type</label>
               <select value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })}
                 className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-900 bg-white">
-                {PRICING_TABLE.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label} — {formatPence(p.price)} {p.unit}</option>
-                ))}
+                {PRICING_TABLE.map((p) => (<option key={p.id} value={p.id}>{p.label} — {formatPence(p.price)} {p.unit}</option>))}
               </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Description</label>
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
                 rows={4} className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-900 resize-y"
-                placeholder="Briefly describe what needs redacting — e.g. 'SAR response — emails, attendance records, and a safeguarding log'"
-                required />
-              <p className="text-xs text-slate-400 mt-1.5">
-                Include the type of request (SAR, FOI, EIR), the volume, and anything sensitive we should know about.
-              </p>
+                placeholder="Briefly describe what needs redacting" required />
             </div>
             <button type="submit" disabled={creating}
               className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-semibold rounded-lg transition-colors">
@@ -469,7 +425,6 @@ const Portal: React.FC = () => {
           </form>
         )}
 
-        {/* Job list */}
         {jobs.length === 0 && !showForm ? (
           <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
             <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
@@ -480,17 +435,13 @@ const Portal: React.FC = () => {
           <div className="space-y-3">
             {jobs.map((job) => (
               <div key={job.id}
-                className={`bg-white rounded-xl border p-5 cursor-pointer transition-all ${
-                  selectedJobId === job.id ? 'border-slate-900 shadow-md' : 'border-slate-200 hover:border-slate-400'
-                }`}
-                onClick={() => selectJob(job)}>
+                className={`bg-white rounded-xl border p-5 cursor-pointer transition-all ${selectedJobId === job.id ? 'border-slate-900 shadow-md' : 'border-slate-200 hover:border-slate-400'}`}
+                onClick={() => { setSelectedJobId(job.id); loadJobDetail(job.id); }}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-mono text-xs font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded">{job.reference}</span>
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${STATUS_TONE[job.status]}`}>
-                        {STATUS_LABEL[job.status]}
-                      </span>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${STATUS_TONE[job.status]}`}>{STATUS_LABEL[job.status]}</span>
                     </div>
                     <h3 className="font-bold text-slate-900">{job.service_type}</h3>
                     <p className="text-sm text-slate-500 mt-1 line-clamp-2">{job.description}</p>
@@ -499,14 +450,10 @@ const Portal: React.FC = () => {
                     </div>
                   </div>
                 </div>
-
-                {/* Expanded view */}
                 {selectedJobId === job.id && (
                   <div className="mt-4 pt-4 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
                     {loadingDetail ? (
-                      <div className="flex items-center gap-2 text-sm text-slate-400 py-4">
-                        <Loader2 className="w-4 h-4 animate-spin" /> Loading files…
-                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-400 py-4"><Loader2 className="w-4 h-4 animate-spin" /> Loading files…</div>
                     ) : (
                       <>
                         {selectedFiles.length > 0 && (
@@ -517,24 +464,13 @@ const Portal: React.FC = () => {
                                 <li key={f.id} className="flex items-center gap-2 text-sm bg-slate-50 rounded px-3 py-2">
                                   <FileText className="w-4 h-4 text-slate-400 shrink-0" />
                                   <span className="flex-1 truncate text-slate-700">{f.file_name}</span>
-                                  {f.file_size != null && (
-                                    <span className="text-xs text-slate-400">
-                                      {f.file_size < 1024 * 1024
-                                        ? `${(f.file_size / 1024).toFixed(0)} KB`
-                                        : `${(f.file_size / (1024 * 1024)).toFixed(1)} MB`}
-                                    </span>
-                                  )}
-                                  {job.status === 'pending' && (
-                                    <button onClick={() => deleteFile(f)} className="text-slate-300 hover:text-red-600">
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
+                                  {f.file_size != null && <span className="text-xs text-slate-400">{f.file_size < 1024 * 1024 ? `${(f.file_size / 1024).toFixed(0)} KB` : `${(f.file_size / (1024 * 1024)).toFixed(1)} MB`}</span>}
+                                  {job.status === 'pending' && <button onClick={() => {/* delete */}} className="text-slate-300 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>}
                                 </li>
                               ))}
                             </ul>
                           </div>
                         )}
-
                         {job.status === 'pending' && (
                           <div className="mb-4">
                             <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-lg cursor-pointer transition-colors">
@@ -544,19 +480,14 @@ const Portal: React.FC = () => {
                                 onChange={(e) => { if (e.target.files?.length) handleUpload(job.id, e.target.files); e.target.value = ''; }}
                                 disabled={uploading} />
                             </label>
-                            <p className="text-xs text-slate-400 mt-2">
-                              Drop in the documents that need redacting. Files are encrypted in transit and at rest.
-                            </p>
                           </div>
                         )}
-
                         {job.status === 'in_review' && (
                           <div className="flex items-start gap-2 text-sm text-blue-700 bg-blue-50 rounded-lg px-4 py-3 mb-3">
                             <Eye className="w-4 h-4 shrink-0 mt-0.5" />
                             <span>Your documents are being reviewed and redacted. You'll get an email when the pack is ready.</span>
                           </div>
                         )}
-
                         {selectedPacks.length > 0 && (
                           <div className="mb-4">
                             <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Redacted packs</h4>
@@ -565,12 +496,9 @@ const Portal: React.FC = () => {
                                 <div key={p.id} className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
                                   <div className="flex-1 min-w-0">
                                     <div className="text-sm font-bold text-slate-900">{p.file_name}</div>
-                                    {p.download_count > 0 && (
-                                      <div className="text-xs text-slate-400 mt-0.5">Downloaded {p.download_count} time{p.download_count === 1 ? '' : 's'}</div>
-                                    )}
+                                    {p.download_count > 0 && <div className="text-xs text-slate-400 mt-0.5">Downloaded {p.download_count} time{p.download_count === 1 ? '' : 's'}</div>}
                                   </div>
-                                  <button onClick={() => downloadPack(p)}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white rounded shrink-0">
+                                  <button onClick={() => downloadPack(p)} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white rounded shrink-0">
                                     <Download className="w-3.5 h-3.5" /> Download
                                   </button>
                                 </div>
@@ -587,15 +515,11 @@ const Portal: React.FC = () => {
           </div>
         )}
 
-        {/* Security note */}
         <div className="mt-10 bg-slate-900 text-white rounded-xl p-6 flex items-start gap-3">
           <Lock className="w-5 h-5 text-white/70 shrink-0 mt-0.5" />
           <div>
             <h3 className="font-bold text-sm">Your documents are secure</h3>
-            <p className="text-xs text-white/60 mt-1">
-              Files are encrypted in transit and at rest. No cloud AI processes your data. Every page is reviewed by a person.
-              {COMPANY.parentCompany} is the data processor — see our <Link to="/privacy" className="underline">privacy policy</Link>.
-            </p>
+            <p className="text-xs text-white/60 mt-1">Files are encrypted in transit and at rest. No cloud AI processes your data. Every page is reviewed by a person. {COMPANY.parentCompany} is the data processor — see our <Link to="/privacy" className="underline">privacy policy</Link>.</p>
           </div>
         </div>
       </div>

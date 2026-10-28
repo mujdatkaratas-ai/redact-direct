@@ -14,10 +14,12 @@ export default function PageTracker() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.gtag) return;
+    // Send only the pathname — never the query string, which may contain
+    // email addresses, session IDs, or other PII.
     window.gtag('config', GA_ID, {
-      page_path: pathname + search,
+      page_path: pathname,
     });
-  }, [pathname, search]);
+  }, [pathname]);
 
   return null;
 }
