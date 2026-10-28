@@ -14,10 +14,13 @@ export const COMPANY = {
   legalName: 'Redact Direct',
   parentCompany: 'ELF Gate Limited',
   tagline: 'Secure Redaction. Confident Disclosure.',
-  email: 'admin@redactdirect.co.uk',
-  phone: '',
+  email: 'support@redactdirect.co.uk',
+  phone: '07912 089 262',
+  phoneDisplay: '07912 089 262',
   url: 'https://redactdirect.co.uk',
   domain: 'redactdirect.co.uk',
+  icoNumber: 'Z', // TODO: fill in ELF Gate Limited ICO registration number
+  companyNumber: '', // TODO: fill in ELF Gate Companies House number if needed
 };
 
 export const PRICING_TABLE = [

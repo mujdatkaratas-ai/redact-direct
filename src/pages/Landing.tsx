@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import {
   ShieldCheck, FileText, Eye, Lock, CheckCircle2, ArrowRight,
   Building2, Scale, Clock, Server, Mail, Upload, Download,
+  Phone, ChevronDown, Award, Users, Clock3,
 } from 'lucide-react';
 import { COMPANY, PRICING_TABLE, formatPence } from '@/lib/config';
+import { useState } from 'react';
 
 const SERVICES = [
   {
@@ -70,6 +72,24 @@ const WHY = [
   { icon: Scale, title: 'UK GDPR compliant', desc: 'Article 28 processor agreements, documented audit trail, secure UK-based storage.' },
 ];
 
+const FAQItem: React.FC<{ q: string; a: string }> = ({ q, a }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-50 transition-colors"
+      >
+        <span className="font-semibold text-slate-900">{q}</span>
+        <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-6 pb-4 text-sm text-slate-600 leading-relaxed">{a}</div>
+      )}
+    </div>
+  );
+};
+
 const Landing: React.FC = () => {
   return (
     <div className="min-h-screen bg-white text-slate-900">
@@ -79,11 +99,15 @@ const Landing: React.FC = () => {
           <Link to="/" className="flex items-center gap-3">
             <img src="/logo.png" alt="Redact Direct" className="h-10 w-auto" />
           </Link>
-          <nav className="flex items-center gap-6">
+          <nav className="flex items-center gap-4 sm:gap-6">
             <a href="#services" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">Services</a>
             <a href="#how" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">How it works</a>
             <a href="#security" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">Security</a>
             <a href="#pricing" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">Pricing</a>
+            <a href="#faq" className="text-sm text-slate-600 hover:text-slate-900 hidden sm:inline">FAQ</a>
+            <a href={`tel:${COMPANY.phone.replace(/\s/g, '')}`} className="hidden md:inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+              <Phone className="w-4 h-4" /> {COMPANY.phoneDisplay}
+            </a>
             <Link
               to="/portal"
               className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded transition-colors"
@@ -116,16 +140,44 @@ const Landing: React.FC = () => {
               Start a redaction job <ArrowRight className="w-5 h-5" />
             </Link>
             <a
-              href="#services"
+              href={`tel:${COMPANY.phone.replace(/\s/g, '')}`}
               className="inline-flex items-center gap-2 px-7 py-3.5 border border-slate-300 hover:border-slate-900 text-slate-900 font-bold rounded-lg transition-colors"
             >
-              See what we redact
+              <Phone className="w-5 h-5" /> {COMPANY.phoneDisplay}
             </a>
           </div>
-          <div className="mt-8 flex items-center justify-center gap-6 text-sm text-slate-400">
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-6 text-sm text-slate-400">
             <span className="inline-flex items-center gap-1.5"><Lock className="w-4 h-4" /> No cloud AI</span>
             <span className="inline-flex items-center gap-1.5"><Eye className="w-4 h-4" /> Human review</span>
             <span className="inline-flex items-center gap-1.5"><Clock className="w-4 h-4" /> 48-hour turnaround</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Trust bar */}
+      <section className="py-8 bg-slate-900 text-white border-t border-slate-800">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            <div className="flex flex-col items-center gap-1.5">
+              <Award className="w-6 h-6 text-white/70" />
+              <div className="text-xs font-bold uppercase tracking-wider text-white/50">ICO Registered</div>
+              <div className="text-sm text-white/80">{COMPANY.parentCompany}</div>
+            </div>
+            <div className="flex flex-col items-center gap-1.5">
+              <ShieldCheck className="w-6 h-6 text-white/70" />
+              <div className="text-xs font-bold uppercase tracking-wider text-white/50">UK GDPR</div>
+              <div className="text-sm text-white/80">Article 28 DPA</div>
+            </div>
+            <div className="flex flex-col items-center gap-1.5">
+              <Lock className="w-6 h-6 text-white/70" />
+              <div className="text-xs font-bold uppercase tracking-wider text-white/50">Air-gapped</div>
+              <div className="text-sm text-white/80">No cloud AI</div>
+            </div>
+            <div className="flex flex-col items-center gap-1.5">
+              <Users className="w-6 h-6 text-white/70" />
+              <div className="text-xs font-bold uppercase tracking-wider text-white/50">Human review</div>
+              <div className="text-sm text-white/80">Every page</div>
+            </div>
           </div>
         </div>
       </section>
@@ -383,13 +435,42 @@ const Landing: React.FC = () => {
           <p className="mt-4 text-lg text-white/60">
             Upload your documents through the secure portal. We'll confirm the price and start work the same day.
           </p>
-          <div className="mt-8">
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               to="/portal"
               className="inline-flex items-center gap-2 px-8 py-4 bg-white text-slate-900 font-bold rounded-lg hover:bg-slate-100 transition-colors"
             >
               Open the client portal <ArrowRight className="w-5 h-5" />
             </Link>
+            <a
+              href={`tel:${COMPANY.phone.replace(/\s/g, '')}`}
+              className="inline-flex items-center gap-2 px-8 py-4 border border-white/20 hover:border-white/40 text-white font-bold rounded-lg transition-colors"
+            >
+              <Phone className="w-5 h-5" /> Call {COMPANY.phoneDisplay}
+            </a>
+          </div>
+          <p className="mt-6 text-sm text-white/40">
+            Prefer email? <a href={`mailto:${COMPANY.email}`} className="text-white/70 underline">{COMPANY.email}</a> — we reply within 4 working hours.
+          </p>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="py-20 lg:py-28">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900">Frequently asked questions</h2>
+            <p className="mt-4 text-lg text-slate-600">Everything you need to know before uploading your documents.</p>
+          </div>
+          <div className="space-y-4">
+            <FAQItem q="Is my data sent to an AI provider like ChatGPT or Google?" a="No. Your documents are processed in an air-gapped environment with no connection to any external AI service. No third-party model ever sees your files. AI assists our team with identification, but every page is reviewed by a person." />
+            <FAQItem q="How long does redaction take?" a="Standard document and SAR redactions are completed within 48 hours. Complex safeguarding material takes up to 5 working days. CCTV is priced per minute and turnaround depends on footage length — we'll confirm when you upload." />
+            <FAQItem q="How do I pay?" a="Payment is made through Stripe at the time you create a job. You'll see the exact price before paying. No account needed — just enter your email, upload your files, and download the redacted pack." />
+            <FAQItem q="Are you GDPR compliant?" a="Yes. We're a UK GDPR data processor registered with the ICO under ELF Gate Limited. We provide Article 28 Data Processing Agreements on request, maintain a documented audit trail, and delete all files 30 days after the redacted pack is delivered." />
+            <FAQItem q="What file types do you accept?" a="PDF, Word, Excel, images (JPG, PNG), and most common document formats. For CCTV and video, we accept MP4, AVI, and MOV. If you have a different format, email us and we'll confirm." />
+            <FAQItem q="Can I talk to someone before paying?" a={`Yes. Call us on ${COMPANY.phoneDisplay} or email ${COMPANY.email} — we'll discuss your requirements, confirm the price, and answer any questions before you commit.`} />
+            <FAQItem q="What happens to my files after redaction?" a="Original files and redacted packs are retained for 30 days after the pack is marked as ready, then permanently deleted. Deletion is verified, not promised. You can request immediate deletion at any time." />
+            <FAQItem q="Can you handle bulk or ongoing work?" a="Yes. We offer annual contracts for academy trusts, local authorities, housing associations and organisations with regular SAR volume. Email us for a bespoke quote." />
           </div>
         </div>
       </section>
@@ -399,16 +480,17 @@ const Landing: React.FC = () => {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <img src="/logo.png" alt="Redact Direct" className="h-8 w-auto" />
-            <div className="text-sm">
-              <Link to="/privacy" className="hover:text-white/80 mr-4">Privacy</Link>
-              <Link to="/terms" className="hover:text-white/80 mr-4">Terms</Link>
-              <Link to="/cookies" className="hover:text-white/80 mr-4">Cookies</Link>
-              <Link to="/dpa" className="hover:text-white/80 mr-4">DPA</Link>
-              <span className="ml-4">A trading name of {COMPANY.parentCompany}</span>
+            <div className="text-sm flex flex-wrap items-center justify-center gap-4">
+              <a href={`tel:${COMPANY.phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1.5 hover:text-white/80"><Phone className="w-3.5 h-3.5" /> {COMPANY.phoneDisplay}</a>
+              <a href={`mailto:${COMPANY.email}`} className="hover:text-white/80">{COMPANY.email}</a>
+              <Link to="/privacy" className="hover:text-white/80">Privacy</Link>
+              <Link to="/terms" className="hover:text-white/80">Terms</Link>
+              <Link to="/cookies" className="hover:text-white/80">Cookies</Link>
+              <Link to="/dpa" className="hover:text-white/80">DPA</Link>
             </div>
           </div>
           <div className="mt-4 text-xs text-white/30 text-center">
-            {COMPANY.email} · {COMPANY.domain} · © {new Date().getFullYear()} {COMPANY.parentCompany}
+            {COMPANY.parentCompany} · ICO registered · {COMPANY.domain} · © {new Date().getFullYear()} {COMPANY.parentCompany}
           </div>
         </div>
       </footer>
