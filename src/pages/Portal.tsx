@@ -161,8 +161,11 @@ const Portal: React.FC = () => {
       saveSession(data.session_token, data.email);
       setCode('');
       setView('jobs');
-      await loadJobs(data.session_token);
-      if (paymentSuccess) {
+      const loadedJobs = await loadJobs(data.session_token);
+      if (paymentSuccess && loadedJobs && loadedJobs.length > 0) {
+        // Fire conversion only after the server confirms the session is valid
+        // and the paid job is visible. Uses the most recent job ID as transaction_id.
+        fireConversion(loadedJobs[0].id);
         toast.success('Payment received', { description: 'Your job is ready for file uploads.' });
         setPaymentSuccess(false);
       }
@@ -173,7 +176,7 @@ const Portal: React.FC = () => {
   };
 
   // ── Load jobs (requires session) ──
-  const loadJobs = async (sessionToken: string) => {
+  const loadJobs = async (sessionToken: string): Promise<Job[]> => {
     try {
       const { data, error } = await supabase.functions.invoke('redact-portal', {
         body: { action: 'load-jobs', session_token: sessionToken },
@@ -182,11 +185,13 @@ const Portal: React.FC = () => {
         clearSession();
         setView('email');
         toast.error('Session expired', { description: 'Please sign in again.' });
-        return;
+        return [];
       }
       setJobs(data.jobs ?? []);
+      return data.jobs ?? [];
     } catch {
       toast.error('Could not load your jobs');
+      return [];
     }
   };
 

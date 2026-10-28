@@ -10,7 +10,7 @@ declare global {
 const GA_ID = 'G-122FTBLJJX';
 
 export default function PageTracker() {
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.gtag) return;
