@@ -161,7 +161,7 @@ const Landing: React.FC = () => {
             <div className="flex flex-col items-center gap-1.5">
               <Award className="w-6 h-6 text-white/70" />
               <div className="text-xs font-bold uppercase tracking-wider text-white/50">ICO Registered</div>
-              <div className="text-sm text-white/80">{COMPANY.parentCompany}</div>
+              <div className="text-sm text-white/80">ZC123078</div>
             </div>
             <div className="flex flex-col items-center gap-1.5">
               <ShieldCheck className="w-6 h-6 text-white/70" />
@@ -490,7 +490,7 @@ const Landing: React.FC = () => {
             </div>
           </div>
           <div className="mt-4 text-xs text-white/30 text-center">
-            {COMPANY.parentCompany} · ICO registered · {COMPANY.domain} · © {new Date().getFullYear()} {COMPANY.parentCompany}
+            {COMPANY.parentCompany} · ICO reg. {COMPANY.icoNumber} · {COMPANY.domain} · © {new Date().getFullYear()} {COMPANY.parentCompany}
           </div>
         </div>
       </footer>

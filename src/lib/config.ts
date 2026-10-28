@@ -19,7 +19,7 @@ export const COMPANY = {
   phoneDisplay: '07912 089 262',
   url: 'https://redactdirect.co.uk',
   domain: 'redactdirect.co.uk',
-  icoNumber: 'Z', // TODO: fill in ELF Gate Limited ICO registration number
+  icoNumber: 'ZC123078',
   companyNumber: '', // TODO: fill in ELF Gate Companies House number if needed
 };
 
