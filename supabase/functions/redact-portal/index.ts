@@ -227,12 +227,14 @@ Deno.serve(async (req: Request) => {
 
     const { data, error } = await supabase
       .from("redact_jobs")
-      .select("id, reference, email, service_type, description, status, file_count, price_pence, created_at")
+      .select("id, reference, email, service_type, description, status, file_count, price_pence, access_token, created_at")
       .eq("email", email)
       .order("created_at", { ascending: false });
 
     if (error) return json({ ok: false, error: error.message }, 500);
 
+    // Return access_tokens so the client can use them for file/pack access.
+    // The email match already proves ownership.
     return json({ ok: true, jobs: data ?? [] });
   }
 

@@ -178,7 +178,12 @@ const Portal: React.FC = () => {
         setAuthing(false);
         return;
       }
-      setJobs(data.jobs ?? []);
+      // Save access tokens for all jobs returned
+      const jobs = data.jobs ?? [];
+      for (const j of jobs) {
+        if (j.access_token) saveToken(j.id, j.access_token);
+      }
+      setJobs(jobs.map((j: Job) => ({ ...j, access_token: undefined })));
       setView('jobs');
     } catch {
       toast.error('Something went wrong — please try again.');
