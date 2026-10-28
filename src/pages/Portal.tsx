@@ -333,7 +333,14 @@ const Portal: React.FC = () => {
         body: { action: 'download-pack', pack_id: pack.id, access_token: token },
       });
       if (error || !data?.ok) { toast.error('Could not generate the download link'); return; }
-      window.open(data.url, '_blank');
+      // Use a hidden anchor instead of window.open to avoid popup blockers
+      const a = document.createElement('a');
+      a.href = data.url;
+      a.download = pack.file_name;
+      a.target = '_self';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch {
       toast.error('Could not generate the download link');
     }
