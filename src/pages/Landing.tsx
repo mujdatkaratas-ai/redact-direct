@@ -401,7 +401,9 @@ const Landing: React.FC = () => {
             <img src="/logo.png" alt="Redact Direct" className="h-8 w-auto" />
             <div className="text-sm">
               <Link to="/privacy" className="hover:text-white/80 mr-4">Privacy</Link>
-              <Link to="/terms" className="hover:text-white/80">Terms</Link>
+              <Link to="/terms" className="hover:text-white/80 mr-4">Terms</Link>
+              <Link to="/cookies" className="hover:text-white/80 mr-4">Cookies</Link>
+              <Link to="/dpa" className="hover:text-white/80 mr-4">DPA</Link>
               <span className="ml-4">A trading name of {COMPANY.parentCompany}</span>
             </div>
           </div>
