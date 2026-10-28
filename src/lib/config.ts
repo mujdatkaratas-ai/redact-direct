@@ -14,7 +14,7 @@ export const COMPANY = {
   legalName: 'Redact Direct',
   parentCompany: 'ELF Gate Limited',
   tagline: 'Secure Redaction. Confident Disclosure.',
-  email: 'support@redactdirect.co.uk',
+  email: 'admin@redactdirect.co.uk',
   phone: '07912 089 262',
   phoneDisplay: '07912 089 262',
   url: 'https://redactdirect.co.uk',
